@@ -1,0 +1,113 @@
+#YOU MUST CHANGE THE FILE NAME ON LINE 104 BEFORE YOU DO ANYTHING ELSE HERE!
+
+library(rtweet) 
+library(tidytext)
+library(ggpubr) 
+library(tidyverse)
+library(httpuv)
+library(stopwords)
+library(hunspell)
+library(readtext)
+
+#This authenticates who you are with Twitter and gives access.
+api_key = [INSERT TWITTER DEVELOPER API KEY HERE]
+api_secret = [INSERT TWITTER DEVELOPER API SECRET HERE]
+
+## authentication via web browser
+token <- create_token(
+  app = [INSERT APP NAME FROM DEVELOPER ACCOUNT HERE0,
+  consumer_key = api_key, 
+  consumer_secret = api_secret
+)
+token
+
+#this actually searches for the word/phrase. it's the google search bar of the program.
+tweets_raw <- search_tweets(
+  q = " \" ", #this is the phrase you're searching for.
+  n = 100,
+  type = "mixed", #you can search for only popular results, in that they have lots of likes, recent or a mix.
+  include_rts = FALSE, #I chose not to include retweets because I don't think they count
+  geocode = NULL,
+  max_id = NULL,
+  parse = TRUE,
+  token = NULL,
+  retryonratelimit = FALSE,
+  verbose = TRUE)
+
+#the following will do some preliminary tidying of the data we just pulled.
+tidy_tweets <- tweets_raw %>% # pipe data frame 
+  filter(is_retweet==FALSE)%>% # only include original tweets
+  select(text)%>% # select variables of interest. In this case we just want the text.
+  unnest_tokens(word, text) # splits column in one token per row format
+
+#some preliminary filtering of the most common words. Most of what is to come is in an effort to eliminate anything we don't want/need.
+my_stop_words <- tibble( #construct a dataframe
+  word = c(
+    "https",
+    "t.co",
+    "rt",
+    "amp",
+    "rstats",
+    "gt"
+  ),
+  lexicon = "twitter" #these are some extra stopwords I want to add. they'll eliminate things like websites from our data.
+)
+# Connect stop words
+all_stop_words <- stop_words %>%
+  bind_rows(my_stop_words) # here we are connecting two sets of stopwords together. my set and the original set.
+
+# flag up any entries with numbers. I've chosen to flag up any entries which have numbers or punctuation and then make a dataset which excludes those rows.
+no_numbers <- tidy_tweets %>%
+  filter(is.na(as.numeric(word))) 
+
+#the following removes any punctuation or any other numbers which manage to sneak into the data.
+filt_tweets <- no_numbers %>%
+  select(word) %>%
+  mutate(
+    unwanted = case_when(
+      str_detect(word, "[\'\".!?\\#-_0123456789]") ~ "yes")) #this is the part that chooses what to flag up.CHANGE FOR PUNCTUATION
+
+#all of the words with unwanted characters are tagged. this next 2 lines select only the entries which HAVE NOT been tagged.
+ready_tweets <- filt_tweets %>%
+  filter(is.na(unwanted))
+
+#after some of the filters have been applied the stopwords remove some of the most common words in the English language.
+no_stop_words <- ready_tweets %>%
+  anti_join(all_stop_words, by = "word")
+
+
+#We need to save our dataset as a plain text file because hunspell is fussy, so that's up next.
+write.table(no_stop_words,"no_stop_words.txt",sep="\t",row.names=FALSE)
+
+#we're going to now save that plaintext to a variable we can run through hunspell.
+text <- readtext(
+  file = "E:\\MyRScripts\\no_stop_words.txt", #this will change from computer to computer
+  ignore_missing_files = FALSE,
+  text_field = NULL,
+  docid_field = NULL,
+  docvarsfrom = c("metadata", "filenames", "filepaths"),
+  dvsep = "_",
+  docvarnames = NULL,
+  encoding = NULL,
+  source = NULL,
+  cache = TRUE,
+  verbosity = readtext_options("verbosity")
+)
+#now we're going to run all of those words through hunspell. It will pop out a list of all the words which are spelled incorrectly.
+neologisms <- hunspell(text$text, format = "text")
+
+#A list is nice, but we need it to be a dataframe. this next part will convert it over
+Neo_data <- as.data.frame(neologisms, col.names = 'word')
+
+#this saves the data as a excel document.Note! You need to be an administrator, and run RStudio as an admin for this to work.
+write.table(Neo_data, 
+            file = "E:\\MyRScripts\\Data\\doublequotes.csv", # CHANGE THIS EVERY TIME!
+            append = TRUE, 
+            quote = FALSE, sep = " ",
+            eol = "\n", 
+            na = "NA", 
+            dec = ".", 
+            row.names = FALSE,
+            col.names = FALSE, 
+            qmethod = c("escape", "double"),
+            fileEncoding = "")
